@@ -1,5 +1,6 @@
 package com.chakritw.qwiz.springutils;
 
+import java.beans.PropertyDescriptor;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.HashMap;
@@ -10,9 +11,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.BeanWrapper;
 import org.springframework.beans.PropertyAccessorFactory;
 import org.springframework.jdbc.core.RowMapper;
-import org.springframework.jdbc.core.namedparam.SqlParameterSource;
+import org.springframework.jdbc.core.namedparam.AbstractSqlParameterSource;
 
-public class TwoWaysJdbcBeanMapper<T> implements RowMapper<T>, SqlParameterSource {
+public class TwoWaysJdbcBeanMapper<T> extends AbstractSqlParameterSource implements RowMapper<T> {
     protected final T bean;
     protected final Class<T> beanClass;
     protected final BeanWrapper beanWrapper;
@@ -46,7 +47,7 @@ public class TwoWaysJdbcBeanMapper<T> implements RowMapper<T>, SqlParameterSourc
 	}
 
     /**
-     * See: SqlParameterSource.hasValue()
+     * See: AbstractSqlParameterSource.hasValue()
      */
     @Override
     public boolean hasValue(String paramName) {
@@ -54,7 +55,7 @@ public class TwoWaysJdbcBeanMapper<T> implements RowMapper<T>, SqlParameterSourc
     }
 
     /**
-     * See: SqlParameterSource.getValue()
+     * See: AbstractSqlParameterSource.getValue()
      */
     @Override
     public Object getValue(String paramName) throws IllegalArgumentException {

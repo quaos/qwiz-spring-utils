@@ -1,0 +1,8 @@
+{
+    "name": "qwiz-spring-utils-test",
+    "data": {
+        "a": 1,
+        "b": 2,
+        "c": "333"
+    }
+}
