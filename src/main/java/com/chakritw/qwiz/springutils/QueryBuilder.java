@@ -448,7 +448,7 @@ public class QueryBuilder<T, TKey> {
         }
 
         @Override
-        public String build(SqlParameterSource params, DatabaseMetaData metadata) {
+        public String build(SqlParameterSource params, DatabaseMetaData metadata) throws SQLException {
             StringBuilder sqlb = new StringBuilder();
             sqlb.append("WHERE ");
             final int n = subClauses.size();
