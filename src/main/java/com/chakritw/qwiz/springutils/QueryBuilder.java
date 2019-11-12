@@ -207,7 +207,7 @@ public class QueryBuilder<T, TKey> {
         return cols;
     }
 
-    protected static abstract class QueryPart {
+    public static abstract class QueryPart {
         protected final QueryPart parent;
 
         protected QueryPart() {
@@ -220,7 +220,7 @@ public class QueryBuilder<T, TKey> {
         public abstract String build(SqlParameterSource params, DatabaseMetaData metadata) throws SQLException;
     }
 
-    protected static class StaticQueryClause extends QueryPart {
+    public static class StaticQueryClause extends QueryPart {
         protected final String sql;
 
         public StaticQueryClause(final QueryPart parent, final String sql) {
@@ -235,7 +235,7 @@ public class QueryBuilder<T, TKey> {
     }
     
 
-    protected static class IfExpr extends QueryPart {
+    public static class IfExpr extends QueryPart {
         protected final Function<SqlParameterSource, Boolean> condFn;
         protected final QueryPart onTrueClause;
         protected final QueryPart onFalseClause;
@@ -263,7 +263,7 @@ public class QueryBuilder<T, TKey> {
         }
     }
     
-    protected static abstract class OpClause extends QueryPart {
+    public static abstract class OpClause extends QueryPart {
         public OpClause() {
         }
         public OpClause(QueryPart parent) {
@@ -271,7 +271,7 @@ public class QueryBuilder<T, TKey> {
         }
     }
 
-    protected class SelectClause extends OpClause {
+    public class SelectClause extends OpClause {
         protected final Map<String, String> tableNamesByAliasMap;
         protected boolean allFromMain;
         protected final List<String> allFromTables;
@@ -596,7 +596,7 @@ public class QueryBuilder<T, TKey> {
 
     }
     
-    protected class UpdateClause extends OpClause {
+    public class UpdateClause extends OpClause {
         protected final String tableName;
         protected final List<String> columns;
         protected final List<String> excludedCols;
@@ -696,7 +696,7 @@ public class QueryBuilder<T, TKey> {
         
     }
 
-    protected class InsertClause extends UpdateClause {
+    public class InsertClause extends UpdateClause {
         protected SelectClause selectClause;
 
         public InsertClause(final String tableName) {
@@ -797,7 +797,7 @@ public class QueryBuilder<T, TKey> {
         
     }
 
-    protected class DeleteClause extends UpdateClause {
+    public class DeleteClause extends UpdateClause {
         public DeleteClause(final String tableName) {
             super(tableName);
         }
@@ -846,7 +846,7 @@ public class QueryBuilder<T, TKey> {
         }
     }
 
-    protected class FromClause extends QueryPart {
+    public class FromClause extends QueryPart {
         protected String tableName;
         protected String asName;
 
@@ -872,7 +872,7 @@ public class QueryBuilder<T, TKey> {
         }
     }
     
-    protected class JoinClause extends FromClause {
+    public class JoinClause extends FromClause {
         public static final String INNER = "INNER";
         public static final String LEFT = "LEFT";
         public static final String RIGHT = "RIGHT";
@@ -953,7 +953,7 @@ public class QueryBuilder<T, TKey> {
     }
 
 
-    protected class WhereClause extends QueryPart {
+    public class WhereClause extends QueryPart {
         protected final List<QueryPart> subClauses;
         //protected DatabaseMetaData metaData;
         protected String conj = "AND";
@@ -1104,7 +1104,7 @@ public class QueryBuilder<T, TKey> {
             return sqlb.toString();
         }
     }
-    protected class OnClause extends WhereClause {
+    public class OnClause extends WhereClause {
         @Override
         public String build(SqlParameterSource params, DatabaseMetaData metadata) throws SQLException {
             StringBuilder sqlb = new StringBuilder();
@@ -1129,10 +1129,10 @@ public class QueryBuilder<T, TKey> {
         }
     }
 
-    protected static abstract class AfterWhereClause extends QueryPart {
+    public static abstract class AfterWhereClause extends QueryPart {
     }
 
-    protected class OrderByClause extends AfterWhereClause {
+    public class OrderByClause extends AfterWhereClause {
         protected final List<String> cols;
         protected final List<Boolean> descs;
 
