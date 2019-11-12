@@ -76,6 +76,7 @@ public class QueryBuilderTest {
 
     @Test
     public void testBuildInsertVals() throws SQLException {
+        init();
         QueryBuilder<TestModel, Long> qb = new QueryBuilder<TestModel, Long>()
             .setDataSource(mockingDataSource)
             .setSchemaName("gg")
@@ -97,6 +98,7 @@ public class QueryBuilderTest {
 
     @Test
     public void testBuildInsertSelect() throws SQLException {
+        init();
         QueryBuilder<TestModel, Long> qb = new QueryBuilder<TestModel, Long>()
             .setDataSource(mockingDataSource)
             .setSchemaName("gg")
