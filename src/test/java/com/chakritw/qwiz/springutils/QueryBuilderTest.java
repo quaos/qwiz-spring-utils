@@ -4,23 +4,56 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
+import java.sql.Connection;
+import java.sql.DatabaseMetaData;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 
+import javax.annotation.PostConstruct;
 import javax.sql.DataSource;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
+import org.mockito.Mockito;
+import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 
 /**
  * QueryBuilder Unit Test
  */
+@ExtendWith(MockitoExtension.class)
 public class QueryBuilderTest {
-    @Mock
+    //@Mock
     private DataSource mockingDataSource;
+    private boolean initState;
+
+    @PostConstruct
+    public void init() {
+        if (initState) {
+            return;   
+        }
+       // if (mockingDataSource == null) {
+        try {
+            ResultSet colsResultSet = Mockito.mock(ResultSet.class);
+            DatabaseMetaData metaData = Mockito.mock(DatabaseMetaData.class);
+            Mockito.when(metaData.getColumns(null, null, null, null))
+                .thenReturn(colsResultSet);
+            Connection con = Mockito.mock(Connection.class);
+            Mockito.when(con.getMetaData()).thenReturn(metaData);
+            DataSource ds = Mockito.mock(DataSource.class);
+            Mockito.when(ds.getConnection()).thenReturn(con);
+            mockingDataSource = ds;
+        } catch (SQLException ex) {
+           throw new RuntimeException(ex.getMessage(), ex);
+        }
+        //}
+        initState = true;
+    }
 
     @Test
     public void testBuildSelect() throws SQLException {
+        init();
         QueryBuilder<TestModel, Long> qb = new QueryBuilder<TestModel, Long>()
             .setDataSource(mockingDataSource)
             .setSchemaName("gg")

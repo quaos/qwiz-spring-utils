@@ -54,7 +54,9 @@ public class QueryBuilder<T, TKey> {
 
     public QueryBuilder<T, TKey> setDataSource(DataSource dataSource) {
         this.dataSource = dataSource;
-        this.jdbcTemplate = new NamedParameterJdbcTemplate(dataSource);
+        this.jdbcTemplate = (dataSource != null)
+            ? new NamedParameterJdbcTemplate(dataSource)
+            : null;
         return this;
     }
 
