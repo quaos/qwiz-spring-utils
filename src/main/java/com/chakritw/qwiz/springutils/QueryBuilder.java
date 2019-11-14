@@ -7,7 +7,9 @@ import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -18,8 +20,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataAccessResourceFailureException;
-import org.springframework.data.relational.core.sql.Select;
-import org.springframework.data.relational.core.sql.Where;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.jdbc.core.namedparam.SqlParameterSource;
@@ -207,7 +207,7 @@ public class QueryBuilder<T, TKey> {
         return cols;
     }
 
-    protected static abstract class QueryPart {
+    public static abstract class QueryPart {
         protected final QueryPart parent;
 
         protected QueryPart() {
@@ -220,7 +220,7 @@ public class QueryBuilder<T, TKey> {
         public abstract String build(SqlParameterSource params, DatabaseMetaData metadata) throws SQLException;
     }
 
-    protected static class StaticQueryClause extends QueryPart {
+    public static class StaticQueryClause extends QueryPart {
         protected final String sql;
 
         public StaticQueryClause(final QueryPart parent, final String sql) {
@@ -235,7 +235,7 @@ public class QueryBuilder<T, TKey> {
     }
     
 
-    protected static class IfExpr extends QueryPart {
+    public static class IfExpr extends QueryPart {
         protected final Function<SqlParameterSource, Boolean> condFn;
         protected final QueryPart onTrueClause;
         protected final QueryPart onFalseClause;
@@ -263,7 +263,7 @@ public class QueryBuilder<T, TKey> {
         }
     }
     
-    protected static abstract class OpClause extends QueryPart {
+    public static abstract class OpClause extends QueryPart {
         public OpClause() {
         }
         public OpClause(QueryPart parent) {
@@ -271,7 +271,10 @@ public class QueryBuilder<T, TKey> {
         }
     }
 
-    protected class SelectClause extends OpClause {
+    public class SelectClause extends OpClause {
+        protected final Map<String, String> tableNamesByAliasMap;
+        protected boolean allFromMain;
+        protected final List<String> allFromTables;
         protected final List<String> excludedCols;
         protected final List<QueryPart> subClauses;
         protected FromClause fromClause;
@@ -286,9 +289,11 @@ public class QueryBuilder<T, TKey> {
         }
         public SelectClause(final QueryPart parent) {
             super(parent);
+            this.tableNamesByAliasMap = new HashMap<>();
+            this.allFromTables = new ArrayList<>();
+            this.excludedCols = new ArrayList<>();
             this.subClauses = new ArrayList<>();
             this.joinClauses = new ArrayList<>();
-            this.excludedCols = new ArrayList<>();
             this.afterWhereClauses = new ArrayList<>();
         }
         public SelectClause(List<String> cols) {
@@ -317,6 +322,14 @@ public class QueryBuilder<T, TKey> {
             return this;
         }
 
+        public SelectClause allFromMain() {
+            this.allFromMain = true;
+            return this;
+        }
+        public SelectClause allFrom(String tbl) {
+            allFromTables.add(tbl);
+            return this;
+        }
         public SelectClause except(String[] cols) {
             except(Arrays.asList(cols));
             return this;
@@ -361,10 +374,12 @@ public class QueryBuilder<T, TKey> {
         }
         public SelectClause from(String table, String asName) {
             setFromClause(new FromClause(table, asName), null);
+            tableNamesByAliasMap.put(asName, table);
             return this;
         }
         public SelectClause from(String table, String asName, Consumer<FromClause> processFn) {
             setFromClause(new FromClause(table, asName), processFn);
+            tableNamesByAliasMap.put(asName, table);
             return this;
         }
         protected void setFromClause(final FromClause clause, final Consumer<? extends FromClause> processFn) {
@@ -384,10 +399,12 @@ public class QueryBuilder<T, TKey> {
         }
         public SelectClause innerJoin(String table, String asName, String onClause) {
             addJoinClause(new JoinClause(JoinClause.INNER, table, asName).on(onClause), null);
+            tableNamesByAliasMap.put(asName, table);
             return this;
         }
         public SelectClause innerJoin(String table, String asName, Consumer<JoinClause> processFn) {
             addJoinClause(new JoinClause(JoinClause.INNER, table, asName), processFn);
+            tableNamesByAliasMap.put(asName, table);
             return this;
         }
 
@@ -401,10 +418,12 @@ public class QueryBuilder<T, TKey> {
         }
         public SelectClause leftJoin(String table, String asName, String onClause) {
             addJoinClause(new JoinClause(JoinClause.LEFT, table, asName).on(onClause), null);
+            tableNamesByAliasMap.put(asName, table);
             return this;
         }
         public SelectClause leftJoin(String table, String asName, Consumer<JoinClause> processFn) {
             addJoinClause(new JoinClause(JoinClause.LEFT, table, asName), processFn);
+            tableNamesByAliasMap.put(asName, table);
             return this;
         }
         
@@ -418,10 +437,12 @@ public class QueryBuilder<T, TKey> {
         }
         public SelectClause rightJoin(String table, String asName, String onClause) {
             addJoinClause(new JoinClause(JoinClause.RIGHT, table, asName).on(onClause), null);
+            tableNamesByAliasMap.put(asName, table);
             return this;
         }
         public SelectClause rightJoin(String table, String asName, Consumer<JoinClause> processFn) {
             addJoinClause(new JoinClause(JoinClause.RIGHT, table, asName), processFn);
+            tableNamesByAliasMap.put(asName, table);
             return this;
         }
 
@@ -492,16 +513,49 @@ public class QueryBuilder<T, TKey> {
             StringBuilder sqlb = new StringBuilder();
             sqlb.append("SELECT ");
             final String tableName = fromClause.tableName;
+            final List<QueryPart> subClauses2 = new ArrayList<>();
+            final List<String> allFromTables2 = new ArrayList<>();
+            if (allFromMain) {
+                allFromTables2.add((fromClause.asName != null) ? fromClause.asName : fromClause.tableName);
+            }
+            allFromTables2.addAll(allFromTables);
+            for (String tbl : allFromTables2) {
+                String tblAlias = null;
+                String fullTblName;
+                if (tableNamesByAliasMap.containsKey(tbl)) {
+                    tblAlias = tbl;
+                    fullTblName = tableNamesByAliasMap.get(tbl);
+                } else {
+                    fullTblName = tbl;
+                    for (Map.Entry<String, String> e : tableNamesByAliasMap.entrySet()) {
+                        if (e.getValue().equals(tbl)) {
+                            tblAlias = e.getKey();
+                            break;
+                        }
+                    }
+                }
+                final List<String> tblCols = getColumnsFromMetadata(fullTblName, metadata);
+                for (String col : tblCols) {
+                    if ((excludedCols.contains(col))
+                        || ((tblAlias != null) && (excludedCols.contains(tblAlias+"."+col)))
+                        || (excludedCols.contains(fullTblName+"."+col)))
+                    {
+                        continue;
+                    }
+                    subClauses2.add(new StaticQueryClause(this, tbl + "." + col));
+                }
+            }
             final int n = subClauses.size();
-            List<QueryPart> subClauses2;
             if (n > 0) {
-                subClauses2 = subClauses;
-            } else {
-                subClauses2 = new ArrayList<>();
+                subClauses2.addAll(subClauses);
+            }
+            int n2 = subClauses2.size();
+            if (n2 <= 0) {
                 final List<String> cols = getIncludedColumns(tableName, null, excludedCols, metadata);
                 cols.forEach((col) -> subClauses2.add(new StaticQueryClause(this, col)));
+                n2 = subClauses2.size();
             }
-            for (int i=0;i < n;i++) {
+            for (int i=0;i < n2;i++) {
                 if (i > 0) {
                     sqlb.append(',');
                 }
@@ -510,6 +564,7 @@ public class QueryBuilder<T, TKey> {
                     continue;
                 }
                 if (clause instanceof QueryBuilder.SelectClause) {
+                    sqlb.append(clausesDelimiter);
                     sqlb.append('(');
                     sqlb.append(clause.build(params, metadata));
                     sqlb.append(')');
@@ -519,24 +574,29 @@ public class QueryBuilder<T, TKey> {
             }
             sqlb.append(clausesDelimiter);
             sqlb.append(fromClause.build(params, metadata));
-            for (QueryPart clause : joinClauses) {
-                sqlb.append(clause.build(params, metadata));
-                sqlb.append(clausesDelimiter);
+            if (!joinClauses.isEmpty()) {
+                for (QueryPart clause : joinClauses) {
+                    sqlb.append(clausesDelimiter);
+                    sqlb.append(clause.build(params, metadata));
+                }
             }
             if (whereClause != null) {
+                sqlb.append(clausesDelimiter);
                 sqlb.append(whereClause.build(params, metadata));
             }
-            for (QueryPart clause : afterWhereClauses) {
-                sqlb.append(clause.build(params, metadata));
+            if (!afterWhereClauses.isEmpty()) {
                 sqlb.append(clausesDelimiter);
+                for (QueryPart clause : afterWhereClauses) {
+                    sqlb.append(clause.build(params, metadata));
+                }
             }
-
+            
             return sqlb.toString();
         }
 
     }
     
-    protected class UpdateClause extends OpClause {
+    public class UpdateClause extends OpClause {
         protected final String tableName;
         protected final List<String> columns;
         protected final List<String> excludedCols;
@@ -636,7 +696,7 @@ public class QueryBuilder<T, TKey> {
         
     }
 
-    protected class InsertClause extends UpdateClause {
+    public class InsertClause extends UpdateClause {
         protected SelectClause selectClause;
 
         public InsertClause(final String tableName) {
@@ -705,6 +765,7 @@ public class QueryBuilder<T, TKey> {
             sqlb.append("INSERT INTO ");
             appendFullTableName(tableName, sqlb);
             sqlb.append(clausesDelimiter);
+            sqlb.append('(');
             final List<String> cols = getIncludedColumns(tableName, columns, excludedCols, metadata);
             final int nCols = cols.size();
             for (int i=0;i < nCols;i++) {
@@ -721,13 +782,14 @@ public class QueryBuilder<T, TKey> {
                     valsSB.append(col);
                 }
             }
+            sqlb.append(')');
             sqlb.append(clausesDelimiter);
             if (selectClause != null) {
                 sqlb.append(selectClause.build(params, metadata));
             } else {
                 sqlb.append("VALUES (");
                 sqlb.append(valsSB.toString());
-                sqlb.append(")");
+                sqlb.append(')');
             }
 
             return sqlb.toString();
@@ -735,7 +797,7 @@ public class QueryBuilder<T, TKey> {
         
     }
 
-    protected class DeleteClause extends UpdateClause {
+    public class DeleteClause extends UpdateClause {
         public DeleteClause(final String tableName) {
             super(tableName);
         }
@@ -784,7 +846,7 @@ public class QueryBuilder<T, TKey> {
         }
     }
 
-    protected class FromClause extends QueryPart {
+    public class FromClause extends QueryPart {
         protected String tableName;
         protected String asName;
 
@@ -810,7 +872,7 @@ public class QueryBuilder<T, TKey> {
         }
     }
     
-    protected class JoinClause extends FromClause {
+    public class JoinClause extends FromClause {
         public static final String INNER = "INNER";
         public static final String LEFT = "LEFT";
         public static final String RIGHT = "RIGHT";
@@ -870,13 +932,13 @@ public class QueryBuilder<T, TKey> {
             StringBuilder sqlb = new StringBuilder();
             sqlb.append(type);
             sqlb.append(" JOIN ");
-            sqlb.append(tableName);
+            appendFullTableName(tableName, sqlb);
             if ((this.asName != null) && (!asName.isEmpty())) {
                 sqlb.append(" AS ");
                 sqlb.append(this.asName);
             }
-            sqlb.append(clausesDelimiter);
-            sqlb.append("ON ");
+            //sqlb.append(clausesDelimiter);
+            sqlb.append(" ON ");
             int nOnClauses = onClauses.size();
             for (int i=0;i < nOnClauses;i++) {
                 if (i > 0) {
@@ -891,7 +953,7 @@ public class QueryBuilder<T, TKey> {
     }
 
 
-    protected class WhereClause extends QueryPart {
+    public class WhereClause extends QueryPart {
         protected final List<QueryPart> subClauses;
         //protected DatabaseMetaData metaData;
         protected String conj = "AND";
@@ -1042,7 +1104,7 @@ public class QueryBuilder<T, TKey> {
             return sqlb.toString();
         }
     }
-    protected class OnClause extends WhereClause {
+    public class OnClause extends WhereClause {
         @Override
         public String build(SqlParameterSource params, DatabaseMetaData metadata) throws SQLException {
             StringBuilder sqlb = new StringBuilder();
@@ -1067,10 +1129,10 @@ public class QueryBuilder<T, TKey> {
         }
     }
 
-    protected static abstract class AfterWhereClause extends QueryPart {
+    public static abstract class AfterWhereClause extends QueryPart {
     }
 
-    protected class OrderByClause extends AfterWhereClause {
+    public class OrderByClause extends AfterWhereClause {
         protected final List<String> cols;
         protected final List<Boolean> descs;
 

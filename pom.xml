@@ -6,7 +6,7 @@
 
   <groupId>com.chakritw.qwiz</groupId>
   <artifactId>qwiz-spring-utils</artifactId>
-  <version>0.0.1-SNAPSHOT</version>
+  <version>0.0.2-SNAPSHOT</version>
 
   <name>qwiz-spring-utils</name>
 	<description>Q'Wiz Utils for Spring Boot</description>

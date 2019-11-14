@@ -8,15 +8,16 @@ import java.sql.Connection;
 import java.sql.DatabaseMetaData;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.Arrays;
 
 import javax.annotation.PostConstruct;
 import javax.sql.DataSource;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
 import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.stubbing.OngoingStubbing;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 
 /**
@@ -24,6 +25,11 @@ import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
  */
 @ExtendWith(MockitoExtension.class)
 public class QueryBuilderTest {
+    private static final String SCHEMA = "gg";
+    private static final String ITEMS_TABLE = "test_items";
+    private static final String ITEMS_JOIN_TABLE = "test_join";
+    private static final String DELIM = "&&";
+    
     //@Mock
     private DataSource mockingDataSource;
     private boolean initState;
@@ -31,14 +37,26 @@ public class QueryBuilderTest {
     @PostConstruct
     public void init() {
         if (initState) {
-            return;   
+            return;
         }
        // if (mockingDataSource == null) {
         try {
-            ResultSet colsResultSet = Mockito.mock(ResultSet.class);
+            /*ResultSet itemColsRS = createMockingColumnsResultSet(new String[] {
+                "id", "name", "is_active", "secret", "remarks"
+            });
+            ResultSet itemJoinColsRS = createMockingColumnsResultSet(new String[] {
+                "id", "t_id", "description"
+            });
+            */
             DatabaseMetaData metaData = Mockito.mock(DatabaseMetaData.class);
-            Mockito.when(metaData.getColumns(null, null, null, null))
-                .thenReturn(colsResultSet);
+            Mockito.lenient().when(metaData.getColumns(null, SCHEMA, ITEMS_TABLE, null))
+                .thenAnswer((inv) -> createMockingColumnsResultSet(new String[] {
+                    "id", "name", "is_active", "secret", "remarks"
+                }));
+            Mockito.lenient().when(metaData.getColumns(null, SCHEMA, ITEMS_JOIN_TABLE, null))
+                .thenAnswer((inv) -> createMockingColumnsResultSet(new String[] {
+                    "id", "t_id", "description"
+                }));
             Connection con = Mockito.mock(Connection.class);
             Mockito.when(con.getMetaData()).thenReturn(metaData);
             DataSource ds = Mockito.mock(DataSource.class);
@@ -51,27 +69,59 @@ public class QueryBuilderTest {
         initState = true;
     }
 
+    private ResultSet createMockingColumnsResultSet(final String[] cols) throws SQLException {
+        ResultSet rs = Mockito.mock(ResultSet.class);
+        final int n = cols.length;
+        final int[] idx = new int[] { 0 };
+        OngoingStubbing<Boolean> nextFn = Mockito.lenient().when(rs.next())
+            .thenAnswer((inv) -> {
+                idx[0]++;
+                return (idx[0] <= n);
+            });
+        OngoingStubbing<String> getColNameFn = Mockito.lenient().when(rs.getString("COLUMN_NAME"))
+            .thenAnswer((inv) -> cols[idx[0] - 1]);
+        /*
+        for (int i = 0;i < n;i++) {
+            getColNameFn = getColNameFn.thenReturn(cols[i]);
+            nextFn = nextFn.thenReturn(i < n-1);
+        }
+        nextFn = nextFn.thenReturn(false);
+        */
+
+        return rs;
+    }
+
     @Test
     public void testBuildSelect() throws SQLException {
         init();
         QueryBuilder<TestModel, Long> qb = new QueryBuilder<TestModel, Long>()
             .setDataSource(mockingDataSource)
-            .setSchemaName("gg")
-                .setClausesDelimiter("\t").select((s) -> {
-                    s.except(new String[] { "active", "secret" });
-                    s.from("test_items", "t").leftJoin("test_join", "tj", (j) -> j.on("t.id = tj.t_id"));
-                    s.where((w) -> {
-                        w.add("active = :active").addIf((p) -> (p.getValue("name") != null), "name = :name");
-                    });
+            .setSchemaName(SCHEMA)
+            .setClausesDelimiter(DELIM)
+            .select((s) -> {
+                s.allFromMain()
+                    .allFrom("tj")
+                    .except(new String[] { "t.is_active", "t.secret", "tj.id", "tj.t_id" });
+                s.from(ITEMS_TABLE, "t")
+                    .leftJoin(ITEMS_JOIN_TABLE, "tj", (j) -> j.on("t.id = tj.t_id"));
+                s.where((w) -> {
+                    w.add("is_active = :is_active")
+                        .addIf((p) -> (p.getValue("name") != null), "name = :name");
                 });
+            });
 
         MapSqlParameterSource params = new MapSqlParameterSource();
         params.addValue("name", "Abc");
-        params.addValue("active", true);
+        params.addValue("is_active", true);
         String sql = qb.build(params);
+        String expected = "SELECT t.id,t.name,t.remarks,tj.description"
+            + DELIM + "FROM " + SCHEMA + "." + ITEMS_TABLE + " AS t"
+            + DELIM + "LEFT JOIN " + SCHEMA + "." + ITEMS_JOIN_TABLE
+            + " AS tj ON (t.id = tj.t_id)"
+            + DELIM + "WHERE (is_active = :is_active)"
+            + DELIM + "AND (name = :name)";
         System.out.println("testBuildSelect() => " + sql);
-        assertEquals(sql, "SELECT id,name,remarks" + "\tFROM test_items AS t"
-                + "\tLEFT JOIN test_join AS tj ON (t.id = tj.t_id)" + "\tWHERE (active = :active)\tAND (name = :name)");
+        assertEquals(expected, sql);
     }
 
     @Test
@@ -79,13 +129,13 @@ public class QueryBuilderTest {
         init();
         QueryBuilder<TestModel, Long> qb = new QueryBuilder<TestModel, Long>()
             .setDataSource(mockingDataSource)
-            .setSchemaName("gg")
-            .setClausesDelimiter("\t")
-            .insert("test_items", "id", (i) -> {
+            .setSchemaName(SCHEMA)
+            .setClausesDelimiter(DELIM)
+            .insert(ITEMS_TABLE, "id", (i) -> {
             });
         MapSqlParameterSource params = new MapSqlParameterSource();
         params.addValue("name", "Abc");
-        params.addValue("active", true);
+        params.addValue("is_active", true);
         String sql = qb.build(params);
         // TODO:
         System.out.println("testBuildInsertVals() => " + sql);
@@ -101,11 +151,11 @@ public class QueryBuilderTest {
         init();
         QueryBuilder<TestModel, Long> qb = new QueryBuilder<TestModel, Long>()
             .setDataSource(mockingDataSource)
-            .setSchemaName("gg")
-            .setClausesDelimiter("\t")
+            .setSchemaName(SCHEMA)
+            .setClausesDelimiter(DELIM)
             .insert("test_items", "id", (i) -> {
                 i.fromSelect((is) -> {
-                    is.except("id").from("test_items").where("name = :name");
+                    is.except("id").from(ITEMS_TABLE).where("name = :name");
                 });
             });
 
