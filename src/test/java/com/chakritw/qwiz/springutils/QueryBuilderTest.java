@@ -125,6 +125,47 @@ public class QueryBuilderTest {
     }
 
     @Test
+    public void testBuildPagedSelect() throws SQLException {
+        init();
+        QueryBuilder<TestModel, Long> qb = new QueryBuilder<TestModel, Long>()
+            .setDataSource(mockingDataSource)
+            .setDialect(QueryBuilder.POSTGRESQL)
+            .setSchemaName(SCHEMA)
+            .setClausesDelimiter(DELIM)
+            .select((s) -> {
+                s.select((ss) -> {
+                    ss.allFromMain()
+                        .allFrom("tj")
+                        .except(new String[] { "t.is_active", "t.secret", "tj.id", "tj.t_id" });
+                    ss.from(ITEMS_TABLE, "t")
+                        .leftJoin(ITEMS_JOIN_TABLE, "tj", (j) -> j.on("t.id = tj.t_id"));
+                    ss.where((w) -> {
+                        w.add("is_active = :is_active")
+                            .addIf((p) -> (p.getValue("name") != null), "name = :name");
+                    });
+                    ss.orderBy(new String[] { "t.id" }, new Boolean[] { true });
+                })
+                .page(0, 20);
+            });
+
+        MapSqlParameterSource params = new MapSqlParameterSource();
+        params.addValue("name", "Abc");
+        params.addValue("is_active", true);
+        String sql = qb.build(params);
+        String expected = "SELECT "
+            + DELIM + "(SELECT t.id,t.name,t.remarks,tj.description"
+            + DELIM + "FROM " + SCHEMA + "." + ITEMS_TABLE + " AS t"
+            + DELIM + "LEFT JOIN " + SCHEMA + "." + ITEMS_JOIN_TABLE
+            + " AS tj ON (t.id = tj.t_id)"
+            + DELIM + "WHERE (is_active = :is_active)"
+            + DELIM + "AND (name = :name)"
+            + DELIM + "ORDER BY t.id DESC)"
+            + DELIM + "OFFSET 0 LIMIT 20";
+        System.out.println("testBuildPagedSelect() => " + sql);
+        assertEquals(expected, sql);
+    }
+
+    @Test
     public void testBuildInsertVals() throws SQLException {
         init();
         QueryBuilder<TestModel, Long> qb = new QueryBuilder<TestModel, Long>()

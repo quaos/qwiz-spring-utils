@@ -18,18 +18,27 @@ import javax.sql.DataSource;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import org.apache.logging.log4j.util.StringBuilderFormattable;
 import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataAccessResourceFailureException;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.jdbc.core.namedparam.SqlParameterSource;
+import org.springframework.jdbc.datasource.AbstractDataSource;
 
 /**
  * TODO: Copy to qwiz-spring-utils
  * 
  */
 public class QueryBuilder<T, TKey> {
+    public static final String POSTGRESQL = "postgresql";
+    public static final String MSSQL = "mssql";
+    public static final String SQLITE = "sqlite";
+
     protected String schemaName;
+    protected String dialect;
     //protected String tableName;
     protected String clausesDelimiter = "\n";
     protected DataSource dataSource;
@@ -47,6 +56,11 @@ public class QueryBuilder<T, TKey> {
         return this;
     }
 
+    public QueryBuilder<T, TKey> setDialect(String dialect) {
+        this.dialect = dialect;
+        return this;
+    }
+    
     public QueryBuilder<T, TKey> setClausesDelimiter(String delim) {
         this.clausesDelimiter = delim;
         return this;
@@ -161,12 +175,11 @@ public class QueryBuilder<T, TKey> {
     }
 
     public String build(SqlParameterSource params) throws SQLException {
-        StringBuilder sqlb = new StringBuilder();
-        DatabaseMetaData metadata = null;
+        final StringBuilder sqlb = new StringBuilder();
         try (Connection conn = dataSource.getConnection()) {
-            metadata = conn.getMetaData();
+            final DatabaseMetaData metadata = conn.getMetaData();
+            sqlb.append(opClause.build(params, metadata));
         }
-        sqlb.append(opClause.build(params, metadata));
 
         return sqlb.toString();
     }
@@ -281,6 +294,7 @@ public class QueryBuilder<T, TKey> {
         protected final List<JoinClause> joinClauses;
         protected WhereClause whereClause;
         protected final List<QueryPart> afterWhereClauses;
+        protected PagingClause pagingClause;
 
         protected String asName;
 
@@ -343,23 +357,23 @@ public class QueryBuilder<T, TKey> {
             return this;
         } 
 
+        //Subquery selects
         public SelectClause select(Consumer<SelectClause> processFn) {
-            addSubSelectClause(new SelectClause(), processFn);
+            addSubSelectClause(new SelectClause(this), processFn);
             return this;
         }
         public SelectClause select(String[] cols) {
-            //Subquery select
-            addSubSelectClause(new SelectClause(Arrays.asList(cols)), null);
+            addSubSelectClause(new SelectClause(this, Arrays.asList(cols)), null);
             return this;
         }
         public SelectClause select(String[] cols, Consumer<SelectClause> processFn) {
-            addSubSelectClause(new SelectClause(Arrays.asList(cols)), processFn);
+            addSubSelectClause(new SelectClause(this, Arrays.asList(cols)), processFn);
             return this;
         }
-        protected void addSubSelectClause(final SelectClause subClause, final Consumer<SelectClause> processFn) {
+        protected void addSubSelectClause(final SelectClause subClause, final Consumer<? extends SelectClause> processFn) {
             //Subquery select
             if (processFn != null) {
-                processFn.accept(subClause);
+                ((Consumer<SelectClause>)processFn).accept(subClause);
             }
             subClauses.add(subClause);
         }
@@ -380,6 +394,12 @@ public class QueryBuilder<T, TKey> {
         public SelectClause from(String table, String asName, Consumer<FromClause> processFn) {
             setFromClause(new FromClause(table, asName), processFn);
             tableNamesByAliasMap.put(asName, table);
+            return this;
+        }
+        public SelectClause fromSelect(String asName, Consumer<SelectClause> processFn) {
+            final FromClause from = new FromClause(this, null, asName);
+            from.select(processFn);
+            setFromClause(from, null);
             return this;
         }
         protected void setFromClause(final FromClause clause, final Consumer<? extends FromClause> processFn) {
@@ -483,20 +503,53 @@ public class QueryBuilder<T, TKey> {
             this.whereClause = clause;
         }
 
+        public SelectClause groupBy(final String[] cols) {
+            groupBy(Arrays.asList(cols));
+            return this;
+        }
+        public SelectClause groupBy(final List<String> cols) {
+            addAfterWhereClause(new GroupByClause(this, cols), null);
+            return this;
+        }
+        public SelectClause groupBy(String[] cols, Consumer<GroupByClause> processFn) {
+            groupBy(Arrays.asList(cols), processFn);
+            return this;
+        }
+        public SelectClause groupBy(List<String> cols, Consumer<GroupByClause> processFn) {
+            addAfterWhereClause(new GroupByClause(this, cols), processFn);
+            return this;
+        }
+
         public SelectClause orderBy(String[] cols) {
-            addAfterWhereClause(new OrderByClause(Arrays.asList(cols)), null);
+            orderBy(Arrays.asList(cols));
+            return this;
+        }
+        public SelectClause orderBy(List<String> cols) {
+            addAfterWhereClause(new OrderByClause(this, cols), null);
             return this;
         }
         public SelectClause orderBy(String[] cols, Consumer<OrderByClause> processFn) {
-            addAfterWhereClause(new OrderByClause(Arrays.asList(cols)), processFn);
+            orderBy(Arrays.asList(cols), processFn);
+            return this;
+        }
+        public SelectClause orderBy(List<String> cols, Consumer<OrderByClause> processFn) {
+            addAfterWhereClause(new OrderByClause(this, cols), processFn);
             return this;
         }
         public SelectClause orderBy(String[] cols, Boolean[] descs) {
-            addAfterWhereClause(new OrderByClause(Arrays.asList(cols), Arrays.asList(descs)), null);
+            orderBy(Arrays.asList(cols), Arrays.asList(descs));
+            return this;
+        }
+        public SelectClause orderBy(List<String> cols, List<Boolean> descs) {
+            addAfterWhereClause(new OrderByClause(this, cols, descs), null);
             return this;
         }
         public SelectClause orderBy(String[] cols, Boolean[] descs, Consumer<OrderByClause> processFn) {
-            addAfterWhereClause(new OrderByClause(Arrays.asList(cols), Arrays.asList(descs)), processFn);
+            orderBy(Arrays.asList(cols), Arrays.asList(descs), processFn);
+            return this;
+        }
+        public SelectClause orderBy(List<String> cols, List<Boolean> descs, Consumer<OrderByClause> processFn) {
+            addAfterWhereClause(new OrderByClause(this, cols, descs), processFn);
             return this;
         }
         protected void addAfterWhereClause(final AfterWhereClause clause,
@@ -508,15 +561,57 @@ public class QueryBuilder<T, TKey> {
             this.afterWhereClauses.add(clause);
         }
 
+        public SelectClause page(PageRequest paging) {
+            setPagingClause(new PagingClause(this, paging.getOffset(), paging.getPageSize()), null);
+            return this;
+        }
+        public SelectClause page(PageRequest paging, Consumer<PagingClause> processFn) {
+            setPagingClause(new PagingClause(this, paging.getOffset(), paging.getPageSize()), processFn);
+            return this;
+        }
+        public SelectClause page(long offset, int pageSize) {
+            setPagingClause(new PagingClause(this, offset, pageSize), null);
+            return this;
+        }
+        public SelectClause page(long offset, int pageSize, Consumer<PagingClause> processFn) {
+            setPagingClause(new PagingClause(this, offset, pageSize), processFn);
+            return this;
+        }
+        protected void setPagingClause(final PagingClause clause,
+            final Consumer<? extends PagingClause> processFn)
+        {
+            if (processFn != null) {
+                ((Consumer<PagingClause>)processFn).accept(clause);
+            }
+            this.pagingClause = clause;
+        }
+
         @Override
         public String build(SqlParameterSource params, DatabaseMetaData metadata) throws SQLException {
+            boolean isMsSql = false;
+            boolean isPostgresSql = false;
+            if (dialect != null) {
+                if (dialect.equals(POSTGRESQL)) {
+                    isPostgresSql = true;
+                } else if (dialect.equals(MSSQL)) {
+                    isMsSql = true;
+                } 
+            }
+
             StringBuilder sqlb = new StringBuilder();
             sqlb.append("SELECT ");
-            final String tableName = fromClause.tableName;
+            if ((isMsSql) && (pagingClause != null)) {
+                sqlb.append(pagingClause.build(params, metadata));
+                sqlb.append(' ');
+            }
             final List<QueryPart> subClauses2 = new ArrayList<>();
             final List<String> allFromTables2 = new ArrayList<>();
-            if (allFromMain) {
-                allFromTables2.add((fromClause.asName != null) ? fromClause.asName : fromClause.tableName);
+            String mainTableName = null;
+            if (fromClause != null) {
+                mainTableName = fromClause.tableName;
+                if (allFromMain) {
+                    allFromTables2.add((fromClause.asName != null) ? fromClause.asName : fromClause.tableName);
+                }
             }
             allFromTables2.addAll(allFromTables);
             for (String tbl : allFromTables2) {
@@ -550,8 +645,8 @@ public class QueryBuilder<T, TKey> {
                 subClauses2.addAll(subClauses);
             }
             int n2 = subClauses2.size();
-            if (n2 <= 0) {
-                final List<String> cols = getIncludedColumns(tableName, null, excludedCols, metadata);
+            if ((n2 <= 0) && (mainTableName != null)) {
+                final List<String> cols = getIncludedColumns(mainTableName, null, excludedCols, metadata);
                 cols.forEach((col) -> subClauses2.add(new StaticQueryClause(this, col)));
                 n2 = subClauses2.size();
             }
@@ -572,8 +667,10 @@ public class QueryBuilder<T, TKey> {
                     sqlb.append(clause.build(params, metadata));
                 }
             }
-            sqlb.append(clausesDelimiter);
-            sqlb.append(fromClause.build(params, metadata));
+            if (fromClause != null) {
+                sqlb.append(clausesDelimiter);
+                sqlb.append(fromClause.build(params, metadata));
+            }
             if (!joinClauses.isEmpty()) {
                 for (QueryPart clause : joinClauses) {
                     sqlb.append(clausesDelimiter);
@@ -585,10 +682,16 @@ public class QueryBuilder<T, TKey> {
                 sqlb.append(whereClause.build(params, metadata));
             }
             if (!afterWhereClauses.isEmpty()) {
-                sqlb.append(clausesDelimiter);
+                //int i = 0;
                 for (QueryPart clause : afterWhereClauses) {
+                    sqlb.append(clausesDelimiter);
                     sqlb.append(clause.build(params, metadata));
+                    //i++;
                 }
+            }
+            if ((!isMsSql) && (pagingClause != null)) {
+                sqlb.append(clausesDelimiter);
+                sqlb.append(pagingClause.build(params, metadata));
             }
             
             return sqlb.toString();
@@ -604,10 +707,7 @@ public class QueryBuilder<T, TKey> {
         protected WhereClause whereClause;
 
         public UpdateClause(final String tableName) {
-            super();
-            this.tableName = tableName;
-            this.columns = new ArrayList<>();
-            this.excludedCols = new ArrayList<>();
+            this((QueryPart)null, tableName);
         }
         public UpdateClause(final String tableName, final List<String> columns) {
             this(tableName);
@@ -615,6 +715,21 @@ public class QueryBuilder<T, TKey> {
         }
         public UpdateClause(final String tableName, final String idCol) {
             this(tableName);
+            withId(idCol);
+        }
+
+        public UpdateClause(final QueryPart parent, final String tableName) {
+            super(parent);
+            this.tableName = tableName;
+            this.columns = new ArrayList<>();
+            this.excludedCols = new ArrayList<>();
+        }
+        public UpdateClause(final QueryPart parent, final String tableName, final List<String> columns) {
+            this(parent, tableName);
+            this.columns.addAll(columns);
+        }
+        public UpdateClause(final QueryPart parent, final String tableName, final String idCol) {
+            this(parent, tableName);
             withId(idCol);
         }
 
@@ -642,20 +757,25 @@ public class QueryBuilder<T, TKey> {
             return this;
         }
 
-        public void where(String cond) {
+        public UpdateClause where(String cond) {
             addWhereClause(new WhereClause().add(cond), null);
+            return this;
         }
-        public void where(String cond, Consumer<WhereClause> processFn) {
+        public UpdateClause where(String cond, Consumer<WhereClause> processFn) {
             addWhereClause(new WhereClause().add(cond), processFn);
+            return this;
         }
-        public void where(QueryPart clause, Consumer<WhereClause> processFn) {
+        public UpdateClause where(QueryPart clause, Consumer<WhereClause> processFn) {
             addWhereClause(new WhereClause().add(clause), processFn);
+            return this;
         }
-        public void whereIdMatches(String idCol) {
+        public UpdateClause whereIdMatches(String idCol) {
             addWhereClause(new WhereClause().add(new StaticQueryClause(this, idCol + " = :" + idCol)), null);
+            return this;
         }
-        public void whereIdMatches(String idCol, Consumer<WhereClause> processFn) {
+        public UpdateClause whereIdMatches(String idCol, Consumer<WhereClause> processFn) {
             addWhereClause(new WhereClause().add(new StaticQueryClause(this, idCol + " = :" + idCol)), processFn);
+            return this;
         }
         protected void addWhereClause(final WhereClause clause, final Consumer<? extends WhereClause> processFn) {
             if (whereClause != null) {
@@ -704,7 +824,15 @@ public class QueryBuilder<T, TKey> {
         }
         public InsertClause(final String tableName, final String idColName) {
             this(tableName);
-            super.withId(idColName);
+            withId(idColName);
+        }
+
+        public InsertClause(final QueryPart parent, final String tableName) {
+            super(parent, tableName);
+        }
+        public InsertClause(final QueryPart parent, final String tableName, final String idColName) {
+            this(parent, tableName);
+            withId(idColName);
         }
 
         @Override
@@ -849,21 +977,52 @@ public class QueryBuilder<T, TKey> {
     public class FromClause extends QueryPart {
         protected String tableName;
         protected String asName;
+        protected SelectClause subSelect;
 
-        public FromClause(String table) {
+        public FromClause(final String table) {
             super();
             this.tableName = table;
         }
-        public FromClause(String table, String asName) {
+        public FromClause(final String table, final String asName) {
             this(table);
             this.asName = asName;
+        }
+
+        public FromClause(final QueryPart parent, final String table) {
+            super(parent);
+            this.tableName = table;
+        }
+        public FromClause(final QueryPart parent, final String table, final String asName) {
+            this(parent, table);
+            this.asName = asName;
+        }
+
+        public FromClause select(final Consumer<SelectClause> processFn) {
+            setSubSelectClause(new SelectClause(this, null), processFn);
+            return this;
+        }
+        public FromClause select(final List<String> cols, final Consumer<SelectClause> processFn) {
+            setSubSelectClause(new SelectClause(this, cols), processFn);
+            return this;
+        }
+        protected void setSubSelectClause(SelectClause subSelect, final Consumer<? extends SelectClause> processFn) {
+            this.subSelect = subSelect;
+            if (processFn != null) {
+                ((Consumer<SelectClause>)processFn).accept(subSelect);
+            }
         }
 
         @Override
         public String build(SqlParameterSource params, DatabaseMetaData metadata) throws SQLException {
             StringBuilder sqlb = new StringBuilder();
             sqlb.append("FROM ");
-            appendFullTableName(tableName, sqlb);
+            if (subSelect != null) {
+                sqlb.append("(");
+                sqlb.append(subSelect.build(params, metadata));
+                sqlb.append(")");
+            } else {
+                appendFullTableName(tableName, sqlb);
+            }
             if ((this.asName != null) && (!asName.isEmpty())) {
                 sqlb.append(" AS ");
                 sqlb.append(this.asName);
@@ -1081,6 +1240,23 @@ public class QueryBuilder<T, TKey> {
             return this;
         }
 
+        public WhereClause addIfExpr(Function<SqlParameterSource, Boolean> checkFn, Consumer<IfExpr> processFn) {
+            final IfExpr ifExpr = new IfExpr(this, checkFn, null);
+            processFn.accept(ifExpr);
+            subClauses.add(ifExpr);
+            return this;
+        }
+
+        //Snippets
+        public WhereClause addIn(String col, String pName) {
+            subClauses.add(new StaticQueryClause(this, Snippets.in(dialect, col, pName) ));
+            return this;
+        }
+        public WhereClause addConcat(String left, String... terms) {
+            subClauses.add(new StaticQueryClause(this, left + Snippets.concat(dialect, terms)));
+            return this;
+        }
+
         @Override
         public String build(SqlParameterSource params, DatabaseMetaData metadata) throws SQLException {
             StringBuilder sqlb = new StringBuilder();
@@ -1130,24 +1306,69 @@ public class QueryBuilder<T, TKey> {
     }
 
     public static abstract class AfterWhereClause extends QueryPart {
+        public AfterWhereClause() {
+        }
+        public AfterWhereClause(QueryPart parent) {
+            super(parent);
+        }
+    }
+
+    public class GroupByClause extends AfterWhereClause {
+        protected final List<String> cols;
+
+        public GroupByClause() {
+            super();
+            this.cols = new ArrayList<>();
+        }
+        public GroupByClause(final List<String> cols) {
+            this();
+            this.cols.addAll(cols);
+        }
+        public GroupByClause(final QueryPart parent) {
+            super(parent);
+            this.cols = new ArrayList<>();
+        }
+        public GroupByClause(final QueryPart parent, final List<String> cols) {
+            this(parent);
+            this.cols.addAll(cols);
+        }
+
+        @Override
+        public String build(final SqlParameterSource params, final DatabaseMetaData metadata) throws SQLException {
+            final StringBuilder sqlb = new StringBuilder();
+            sqlb.append("GROUP BY ");
+            sqlb.append(String.join(",", cols));
+            return sqlb.toString();
+        }
     }
 
     public class OrderByClause extends AfterWhereClause {
         protected final List<String> cols;
         protected final List<Boolean> descs;
 
-        public OrderByClause(List<String> cols) {
+        public OrderByClause(final List<String> cols) {
+            super();
             this.cols = cols;
             this.descs = new ArrayList<>();
         }
-        public OrderByClause(List<String> cols, List<Boolean> descs) {
+        public OrderByClause(final List<String> cols, List<Boolean> descs) {
             this(cols);
+            this.descs.clear();
+            this.descs.addAll(descs);
+        }
+        public OrderByClause(final QueryPart parent, final List<String> cols) {
+            super(parent);
+            this.cols = cols;
+            this.descs = new ArrayList<>();
+        }
+        public OrderByClause(final QueryPart parent, final List<String> cols, final List<Boolean> descs) {
+            this(parent, cols);
             this.descs.clear();
             this.descs.addAll(descs);
         }
 
         @Override
-        public String build(SqlParameterSource params, DatabaseMetaData metadata) throws SQLException {
+        public String build(final SqlParameterSource params, final DatabaseMetaData metadata) throws SQLException {
             final StringBuilder sqlb = new StringBuilder();
             sqlb.append("ORDER BY ");
             final int nCols = cols.size();
@@ -1167,5 +1388,65 @@ public class QueryBuilder<T, TKey> {
         }
     }
 
-    //TODO: GroupBy & Paging Clauses
+    public class PagingClause extends AfterWhereClause {
+        protected final long offset;
+        protected final int pageSize;
+
+        public PagingClause(final long offset, final int pageSize) {
+            super();
+            this.offset = offset;
+            this.pageSize = pageSize;
+        }
+        public PagingClause(final QueryPart parent, final long offset, final int pageSize) {
+            super(parent);
+            this.offset = offset;
+            this.pageSize = pageSize;
+        }
+
+        @Override
+        public String build(final SqlParameterSource params, final DatabaseMetaData metadata) throws SQLException {
+            final StringBuilder sqlb = new StringBuilder();
+
+            if (dialect != null) {
+                if (dialect.equals(POSTGRESQL)) {
+                    sqlb.append("OFFSET ");
+                    sqlb.append(offset);
+                    sqlb.append(" LIMIT ");
+                    sqlb.append(pageSize);
+                    return sqlb.toString();
+                } else if (dialect.equals(MSSQL)) {
+                    sqlb.append("TOP ");
+                    sqlb.append(pageSize);
+                    sqlb.append(" OFFSET ");
+                    sqlb.append(offset);
+                    return sqlb.toString();
+                }
+            }
+
+            sqlb.append("OFFSET ");
+            sqlb.append(offset);
+            sqlb.append(" LIMIT ");
+            sqlb.append(pageSize);
+
+            return sqlb.toString();
+        }
+    }
+
+    public static class Snippets {
+        public static String in(final String dialect, String col, String pName) {
+            return col + " IN (:" + pName + ")";
+        }
+
+        public static String concat(final String dialect, String... terms) {
+            if (dialect != null) {
+                if (dialect.equals(POSTGRESQL)) {
+                    return String.join("||", terms);
+                }
+            }
+
+            return "CONCAT(" + String.join(",", terms) + ")";
+        }
+
+        
+    }
 }
