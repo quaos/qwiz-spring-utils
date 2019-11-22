@@ -9,6 +9,7 @@ import java.lang.reflect.Type;
 import java.sql.Connection;
 import java.sql.DatabaseMetaData;
 import java.sql.ResultSet;
+import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -53,13 +54,27 @@ public class TwoWaysJdbcBeanMapperTest {
         initState = true;
     }
 
-    private ResultSet createMockingResultSet(final Collection<Map<String, ?>> rows) throws SQLException {
-        ResultSet rs = Mockito.mock(ResultSet.class);
+    private ResultSetMetaData createMockingResultSetMetaData(final String... cols) throws SQLException {
+        final ResultSetMetaData rsmd = Mockito.mock(ResultSetMetaData.class);
+        Mockito.lenient().when(rsmd.getColumnCount()).thenReturn(cols.length);
+        Mockito.lenient().when(rsmd.getColumnLabel(Mockito.anyInt()))
+            .thenAnswer((inv) -> {
+                int idx = inv.getArgument(0);
+                return cols[idx - 1];
+            });
+
+        return rsmd;
+    }
+    private ResultSet createMockingResultSet(final Collection<Map<String, ?>> rows,
+        final ResultSetMetaData rsmd) throws SQLException
+    {
+        final ResultSet rs = Mockito.mock(ResultSet.class);
         final Iterator<Map<String, ?>> rowsIter = rows.iterator();
         // final int n = rows.size();
         final int[] idx = new int[] { 0 };
         final List<Map<String, ?>> row = new ArrayList<>();
         row.add(null);
+        Mockito.lenient().when(rs.getMetaData()).thenReturn(rsmd);
         // OngoingStubbing<Boolean> nextFn =
         Mockito.lenient().when(rs.next()).thenAnswer((inv) -> {
             if (!rowsIter.hasNext()) {
@@ -143,10 +158,12 @@ public class TwoWaysJdbcBeanMapperTest {
                 put("is_active", false);
             }}
         );
-        final ResultSet rs = createMockingResultSet(rows);
+        final ResultSetMetaData rsmd = createMockingResultSetMetaData("id", "name", "is_active");
+        final ResultSet rs = createMockingResultSet(rows, rsmd);
         final TwoWaysJdbcBeanMapper<TestModel> mapper = new TwoWaysJdbcBeanMapper<>(TestModel.class);
         mapper.mapSameExcept("active")
-            .map("active", "is_active");
+            .map("active", "is_active")
+            .map("nonexisting", "non_existing$!&#column");
         int i = 0;
         while (rs.next()) {
             System.out.println("testMapRow(): " + rows.get(i));

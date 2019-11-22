@@ -250,8 +250,8 @@ public class QueryBuilder<T, TKey> {
 
     public static class IfExpr extends QueryPart {
         protected final Function<SqlParameterSource, Boolean> condFn;
-        protected final QueryPart onTrueClause;
-        protected final QueryPart onFalseClause;
+        protected QueryPart onTrueClause;
+        protected QueryPart onFalseClause;
 
         public IfExpr(final QueryPart parent, Function<SqlParameterSource, Boolean> condFn, final QueryPart onTrueClause) {
             this(parent, condFn, onTrueClause, null);
@@ -263,6 +263,23 @@ public class QueryBuilder<T, TKey> {
             this.condFn = condFn;
             this.onTrueClause = onTrueClause;
             this.onFalseClause = onFalseClause;
+        }
+
+        public IfExpr ifTrue(String clause) {
+            ifTrue(new StaticQueryClause(this, clause));
+            return this;
+        }
+        public IfExpr ifTrue(QueryPart clause) {
+            this.onTrueClause = clause;
+            return this;
+        }
+        public IfExpr orElse(String clause) {
+            orElse(new StaticQueryClause(this, clause));
+            return this;
+        }
+        public IfExpr orElse(QueryPart clause) {
+            this.onFalseClause = clause;
+            return this;
         }
 
         @Override
@@ -1240,6 +1257,12 @@ public class QueryBuilder<T, TKey> {
             return this;
         }
 
+
+        public WhereClause addIfNotNull(final String paramName, final String onTrueCond) {
+            addIf((p) -> (p.hasValue(paramName)) && (p.getValue(paramName) != null), onTrueCond);
+            return this;
+        }
+
         public WhereClause addIfExpr(Function<SqlParameterSource, Boolean> checkFn, Consumer<IfExpr> processFn) {
             final IfExpr ifExpr = new IfExpr(this, checkFn, null);
             processFn.accept(ifExpr);
@@ -1262,19 +1285,25 @@ public class QueryBuilder<T, TKey> {
             StringBuilder sqlb = new StringBuilder();
             sqlb.append("WHERE ");
             final int n = subClauses.size();
+            int nRendered = 0;
             for (int i=0;i < n;i++) {
-                if (i > 0) {
+                final QueryPart clause = subClauses.get(i);
+                if (clause == null) {
+                    continue;
+                }
+                final String clauseSQL = clause.build(params, metadata);
+                if ((clauseSQL == null) || (clauseSQL.isEmpty())) {
+                    continue;
+                }
+                if (nRendered > 0) {
                     sqlb.append(clausesDelimiter);
                     sqlb.append(conj);
                     sqlb.append(' ');
                 }
-                QueryPart clause = subClauses.get(i);
-                if (clause == null) {
-                    continue;
-                }
                 sqlb.append('(');
-                sqlb.append(clause.build(params, metadata));
+                sqlb.append(clauseSQL);
                 sqlb.append(')');
+                nRendered++;
             }
 
             return sqlb.toString();

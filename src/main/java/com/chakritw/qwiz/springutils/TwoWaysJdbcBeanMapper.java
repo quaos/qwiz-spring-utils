@@ -5,14 +5,17 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.sql.ResultSet;
+import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.regex.Matcher;
@@ -57,9 +60,24 @@ public class TwoWaysJdbcBeanMapper<T> extends AbstractSqlParameterSource impleme
      */
     @Override
     public T mapRow(ResultSet rs, int rowNum) throws SQLException {
-        Map<String, Object> m = new HashMap<>();
+        //Prevent missing columns in limited/subset queries
+        ResultSetMetaData rsmd = rs.getMetaData();
+        final int nCols = rsmd.getColumnCount();
+        final Set<String> rsCols = new HashSet<>();
+        for (int i = 1;i <= nCols;i++) {
+            final String col = rsmd.getColumnLabel(i);
+            if (col == null) {
+                continue;
+            }
+            rsCols.add(col.toLowerCase());
+        }
+
+        final Map<String, Object> m = new HashMap<>();
         for (Map.Entry<String, String> e : invMap.entrySet()) {
             String colName = e.getKey();
+            if ((colName == null) || (!rsCols.contains(colName.toLowerCase()))) {
+                continue;
+            }
             String propName = e.getValue();
             Object colVal = rs.getObject(colName);
             m.put(propName, colVal);
