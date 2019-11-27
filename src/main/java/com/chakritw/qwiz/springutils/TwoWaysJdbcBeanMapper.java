@@ -117,7 +117,7 @@ public class TwoWaysJdbcBeanMapper<T> extends AbstractSqlParameterSource impleme
         return beanWrapper.getPropertyValue(propName);
     }
 
-    public String getMappedName(String propName) {
+    public String getMappedName(final String propName) {
         return fwdMap.get(propName);
     }
 
@@ -126,18 +126,18 @@ public class TwoWaysJdbcBeanMapper<T> extends AbstractSqlParameterSource impleme
         return this;
     }
 
-    public TwoWaysJdbcBeanMapper<T> mapSameExcept(String... excludedProps) {
+    public TwoWaysJdbcBeanMapper<T> mapSameExcept(final String... excludedProps) {
         mapSameExcept(Arrays.asList(excludedProps));
         return this;
     }
 
-    public TwoWaysJdbcBeanMapper<T> mapSameExcept(Collection<String> excludedProps) {
+    public TwoWaysJdbcBeanMapper<T> mapSameExcept(final Collection<String> excludedProps) {
         final Collection<String> props = getPropNames(excludedProps);
         props.forEach((prop) -> map(prop, prop));
         return this;
     }
 
-    public TwoWaysJdbcBeanMapper<T> map(Function<String, String> ruleFn) {
+    public TwoWaysJdbcBeanMapper<T> map(final Function<String, String> ruleFn) {
         final Collection<String> props = getPropNames(null);
         props.forEach((prop) -> {
             Optional.ofNullable(ruleFn.apply(prop))
@@ -146,7 +146,7 @@ public class TwoWaysJdbcBeanMapper<T> extends AbstractSqlParameterSource impleme
         return this;
     }
 
-    public TwoWaysJdbcBeanMapper<T> map(BiFunction<String, Class<?>, String> ruleFn) {
+    public TwoWaysJdbcBeanMapper<T> map(final BiFunction<String, Class<?>, String> ruleFn) {
         final Map<String, Class<?>> propsMap = getPropNamesAndTypesMap(null);
         propsMap.entrySet().forEach((e) -> {
             final String propName = e.getKey();
@@ -156,23 +156,34 @@ public class TwoWaysJdbcBeanMapper<T> extends AbstractSqlParameterSource impleme
         return this;
     }
 
-    public TwoWaysJdbcBeanMapper<T> map(Map<String, String> m) {
+    public TwoWaysJdbcBeanMapper<T> map(final Map<String, String> m) {
         m.entrySet().forEach((e) -> map(e.getKey(), e.getValue()));
         return this;
     }
 
-    public TwoWaysJdbcBeanMapper<T> map(Collection<Map.Entry<String, String>> entries) {
+    public TwoWaysJdbcBeanMapper<T> map(final Collection<Map.Entry<String, String>> entries) {
         entries.forEach((e) -> map(e.getKey(), e.getValue()));
         return this;
     }
 
-    public TwoWaysJdbcBeanMapper<T> map(String propName, String colName) {
+    public TwoWaysJdbcBeanMapper<T> map(final String propName, final String colName) {
+        unmap(propName);
         fwdMap.put(propName, colName);
         invMap.put(colName, propName);
         return this;
     }
+    public TwoWaysJdbcBeanMapper<T> unmap(final String... props) {
+        for (String propName : props) {
+            final String colName = fwdMap.remove(propName);
+            if (colName != null) {
+                invMap.remove(colName);
+            }
+        }
 
-    protected Collection<String> getPropNames(Collection<String> excludedProps) {
+        return this;
+    }
+
+    protected Collection<String> getPropNames(final Collection<String> excludedProps) {
         Map<String, Class<?>> m = getPropNamesAndTypesMap(excludedProps);
         return m.keySet();
     }
